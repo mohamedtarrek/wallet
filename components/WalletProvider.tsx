@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, createContext, useContext } from 'react'
+import { useState, useEffect, createContext, useContext } from 'react'
 import { Connection, clusterApiUrl, PublicKey } from '@solana/web3.js'
 
 interface PhantomWallet {
@@ -40,7 +40,6 @@ declare global {
 }
 
 const PHANTOM_DEEP_LINK = 'https://phantom.app/ul/v1/connect'
-const PHANTOM_INSTALL_URL = 'https://phantom.app/download'
 
 function getPhantomWallet(): PhantomWallet | null {
   if (typeof window !== 'undefined' && window.phantom?.solana) {
@@ -64,19 +63,38 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [connecting, setConnecting] = useState(false)
   const [connection, setConnection] = useState<Connection | null>(null)
 
+  // ✅ INIT + AUTO RECONNECT
   useEffect(() => {
-    const network = clusterApiUrl('devnet')
-    setConnection(new Connection(network, 'confirmed'))
+    const init = async () => {
+      const network = clusterApiUrl('devnet')
+      const conn = new Connection(network, 'confirmed')
+      setConnection(conn)
 
-    const phantom = getPhantomWallet()
-    if (phantom?.publicKey) {
-      const pubKey = phantom.publicKey.toBase58()
-      setPublicKey(pubKey)
-      setConnected(true)
-      fetchBalance(pubKey)
+      const tryReconnect = async () => {
+        const phantom = getPhantomWallet()
+        if (!phantom) return
+
+        try {
+          const resp = await phantom.connect({ onlyIfTrusted: true })
+          const pubKey = resp.publicKey.toBase58()
+          setPublicKey(pubKey)
+          setConnected(true)
+          await fetchBalance(pubKey)
+        } catch {
+          // ignore
+        }
+      }
+
+      // 🔥 retry عشان injection delay
+      setTimeout(tryReconnect, 500)
+      setTimeout(tryReconnect, 1500)
+      setTimeout(tryReconnect, 3000)
     }
+
+    init()
   }, [])
 
+  // ✅ EVENTS
   useEffect(() => {
     const phantom = getPhantomWallet()
     if (!phantom) return
@@ -115,35 +133,29 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // ✅ CONNECT (FIXED)
   const connect = async () => {
     const phantom = getPhantomWallet()
 
+    // 🔥 لو مش موجود → افتح Phantom
     if (!phantom) {
-      window.location.href = PHANTOM_INSTALL_URL
+      const url = buildPhantomUrl(window.location.href)
+      window.location.href = url
       return
     }
 
     try {
       setConnecting(true)
-      const response = await phantom.connect({ onlyIfTrusted: true })
+
+      // ❗ بدون onlyIfTrusted
+      const response = await phantom.connect()
+
       const pubKey = response.publicKey.toBase58()
       setPublicKey(pubKey)
       setConnected(true)
       await fetchBalance(pubKey)
-    } catch (err: any) {
-      if (err.message?.includes('User rejected') || err.message?.includes('user rejected')) {
-        try {
-          const response = await phantom.connect()
-          const pubKey = response.publicKey.toBase58()
-          setPublicKey(pubKey)
-          setConnected(true)
-          await fetchBalance(pubKey)
-        } catch (retryErr) {
-          console.error('Connection failed:', retryErr)
-        }
-      } else {
-        console.error('Connection error:', err)
-      }
+    } catch (err) {
+      console.error('Connection error:', err)
     } finally {
       setConnecting(false)
     }
