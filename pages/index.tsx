@@ -16,6 +16,17 @@ export default function Home() {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [walletDetected, setWalletDetected] = useState(false)
+  const [balanceLoading, setBalanceLoading] = useState(false)
+
+  // Track when balance is being fetched
+  useEffect(() => {
+    if (connected && publicKey && balance === null && !balanceLoading) {
+      setBalanceLoading(true)
+    }
+    if (balance !== null) {
+      setBalanceLoading(false)
+    }
+  }, [connected, publicKey, balance, balanceLoading])
 
   useEffect(() => {
     setIsMobile(isMobileDevice())
@@ -221,10 +232,6 @@ export default function Home() {
               Disconnect
             </button>
           </div>
-        )}
-
-        {!connected && connecting === false && publicKey === null && (
-          <></>
         )}
       </main>
 
