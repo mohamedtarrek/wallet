@@ -9,6 +9,7 @@ interface WalletState {
   connected: boolean
   connect: () => void
   disconnect: () => void
+  refreshBalance: () => Promise<void>
 }
 
 const WalletStateContext = createContext<WalletState>({} as WalletState)
@@ -25,10 +26,27 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     new Connection(clusterApiUrl('devnet'), 'confirmed')
   )
 
-  // 🔐 keys
   const [dappKeyPair] = useState(nacl.box.keyPair())
 
-  // ✅ handle redirect from Phantom
+  // =========================
+  // 🔥 RESTORE SESSION (reload fix)
+  // =========================
+  useEffect(() => {
+    const saved = localStorage.getItem('wallet_pubkey')
+
+    if (saved) {
+      setPublicKey(saved)
+      setConnected(true)
+
+      setTimeout(() => {
+        fetchBalance(saved)
+      }, 500)
+    }
+  }, [])
+
+  // =========================
+  // 🔥 HANDLE PHANTOM REDIRECT
+  // =========================
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
 
@@ -49,31 +67,43 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       if (!decrypted) throw new Error('Decryption failed')
 
       const decoded = JSON.parse(Buffer.from(decrypted).toString())
-
       const walletPubKey = decoded.public_key
 
       setPublicKey(walletPubKey)
       setConnected(true)
 
-      fetchBalance(walletPubKey)
+      localStorage.setItem('wallet_pubkey', walletPubKey)
 
-      // 🔥 نظف URL
+      setTimeout(() => {
+        fetchBalance(walletPubKey)
+      }, 500)
+
+      // تنظيف URL
       window.history.replaceState({}, document.title, window.location.pathname)
+
     } catch (err) {
       console.error('Decryption error:', err)
     }
   }, [])
 
+  // =========================
+  // 💰 FETCH BALANCE
+  // =========================
   const fetchBalance = async (pubKey: string) => {
     try {
-      const lamports = await connection.getBalance(new PublicKey(pubKey))
-      setBalance(lamports / 1e9)
-    } catch {
+      const balanceLamports = await connection.getBalance(
+        new PublicKey(pubKey)
+      )
+      setBalance(balanceLamports / 1e9)
+    } catch (err) {
+      console.error('Balance error:', err)
       setBalance(null)
     }
   }
 
-  // 🚀 connect (REAL mobile deep link)
+  // =========================
+  // 🚀 CONNECT (REAL PHANTOM FLOW)
+  // =========================
   const connect = () => {
     const params = new URLSearchParams({
       dapp_encryption_public_key: bs58.encode(dappKeyPair.publicKey),
@@ -85,10 +115,23 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     window.location.href = `${PHANTOM_URL}?${params.toString()}`
   }
 
+  // =========================
+  // 🔌 DISCONNECT
+  // =========================
   const disconnect = () => {
     setPublicKey(null)
-    setConnected(false)
     setBalance(null)
+    setConnected(false)
+    localStorage.removeItem('wallet_pubkey')
+  }
+
+  // =========================
+  // 🔄 REFRESH BALANCE
+  // =========================
+  const refreshBalance = async () => {
+    if (publicKey) {
+      await fetchBalance(publicKey)
+    }
   }
 
   return (
@@ -99,6 +142,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         connected,
         connect,
         disconnect,
+        refreshBalance,
       }}
     >
       {children}
